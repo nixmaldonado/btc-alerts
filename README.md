@@ -4,15 +4,13 @@
 
 "btc-alerts" is a notification service to get alerts on Bitcoin price.
 
-Subscriptions are done through webhooks.
+Notifications are delivered by email (Amazon SES). Webhook delivery is planned as a v2 channel.
 
-2 modes of alerts available:
-- Rolling 24 hours % change threshold
-- Price target reached (fired once after armed)
+Two alert modes:
+- **Price target reached** (P0) — fires once when BTC crosses an absolute target price. Percentage targets are supported by computing the absolute target at creation time (`target = reference_price * (1 + pct)`), so they evaluate on the same path.
+- **Rolling 24-hour % change threshold** (v2, not yet implemented) — needs a price-history store and a separate evaluation path.
 
-Price target alert is fired once to avoid spamming subscriber if threshold is crossed multiple times.
-
-Price target alerts can be re-armed manually without having to set all the information of the alert again.
+A price-target alert fires once and then disarms, to avoid spamming the subscriber if the threshold is crossed multiple times. It can be re-armed manually without re-entering the alert's configuration.
 
 ## Pre-Requisites
 
@@ -20,7 +18,11 @@ Price target alerts can be re-armed manually without having to set all the infor
 
 ## Data Flow Diagram
 
-[TBD]
+<p align="center">
+  <img src="docs/architecture.svg?v=3" alt="BTC Alerts data flow: an EventBridge-scheduled evaluator Lambda fetches BTC prices from CoinGecko and writes fired alerts to DynamoDB; a DynamoDB Streams trigger drives a Notifier Lambda that sends email via SES; users configure alerts through API Gateway." width="900">
+</p>
+
+The evaluator Lambda runs on an EventBridge schedule with reserved concurrency `1`, so price ticks are processed serially. This keeps the "previous price → current price" crossing detection ordered without needing a queue. On each tick it pulls the latest BTC price from CoinGecko and fires any armed alerts whose target the price just crossed. Firing is a single conditional write to DynamoDB (`armed → fired`); a DynamoDB Streams trigger then drives the Notifier Lambda, which delivers the alert email through SES. Decoupling delivery from evaluation via the stream means a notification can never be lost or duplicated by a partial write. Users manage their alerts through API Gateway in front of the Price Alert API Lambda.
 
 ## Example
 
@@ -48,7 +50,7 @@ terraform apply
 
 The design of this service had the minimum cost possible in mind so it can service as many requests as possible before it starts incurring costs.
 
-Lambda, SNS, SQS, CloudWatch (logs, metrics, and alarms), and DynamoDB run within AWS's always-free tier. DynamoDB uses provisioned capacity at 25 RCU and 25 WCU with auto-scaling disabled, which is the always-free ceiling and gives a hard $0 storage-cost floor. API Gateway is covered by the 12-month introductory free tier; after that, expected cost at demo scale is a few dollars per month.
+Lambda, DynamoDB (including DynamoDB Streams), SQS (the Notifier's dead-letter queue), EventBridge (scheduler), and CloudWatch (logs, metrics, and alarms) run within AWS's always-free tier. DynamoDB uses provisioned capacity at 25 RCU and 25 WCU with auto-scaling disabled, which is the always-free ceiling and gives a hard $0 storage-cost floor. Reading DynamoDB Streams from a Lambda trigger incurs no additional charge. SES runs in sandbox mode for the demo (its free allotment covers 3,000 messages/month). API Gateway is covered by the 12-month introductory free tier; after that, expected cost at demo scale is a few dollars per month.
 
 ### DoW attacks 
 
