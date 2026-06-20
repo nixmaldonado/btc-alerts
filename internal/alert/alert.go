@@ -74,3 +74,15 @@ func NewAlert(ownerID, id, email string, targetPrice, referencePrice float64, pc
 func TargetFromPct(referencePrice, pct float64) float64 {
 	return referencePrice * (1 + pct)
 }
+
+// Fire marks the alert fired at the given time.
+func (a *Alert) Fire(now time.Time) {
+	a.Status = StatusFired
+	a.FiredAt = &now
+}
+
+// Rearm returns the alert to the armed state, clearing the fired timestamp.
+func (a *Alert) Rearm() {
+	a.Status = StatusArmed
+	a.FiredAt = nil
+}

@@ -65,3 +65,31 @@ func TestTargetFromPct(t *testing.T) {
 		t.Errorf("TargetFromPct(70000, 0.10) = %v, want 77000", got)
 	}
 }
+
+func TestFire_SetsFiredStatusAndTimestamp(t *testing.T) {
+	a, _ := NewAlert("k", "id", "user@example.com", 71000, 70000, nil, testNow)
+	fireTime := testNow.Add(time.Hour)
+
+	a.Fire(fireTime)
+
+	if a.Status != StatusFired {
+		t.Errorf("status = %q, want FIRED", a.Status)
+	}
+	if a.FiredAt == nil || *a.FiredAt != fireTime {
+		t.Errorf("firedAt = %v, want %v", a.FiredAt, fireTime)
+	}
+}
+
+func TestRearm_ResetsToArmedAndClearsFiredAt(t *testing.T) {
+	a, _ := NewAlert("k", "id", "user@example.com", 71000, 70000, nil, testNow)
+	a.Fire(testNow.Add(time.Hour))
+
+	a.Rearm()
+
+	if a.Status != StatusArmed {
+		t.Errorf("status = %q, want ARMED", a.Status)
+	}
+	if a.FiredAt != nil {
+		t.Errorf("firedAt = %v, want nil", a.FiredAt)
+	}
+}
