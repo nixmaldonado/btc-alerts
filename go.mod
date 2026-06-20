@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.24
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.59.0
+	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.62.4
 	github.com/awslabs/aws-lambda-go-api-proxy v0.16.2
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0

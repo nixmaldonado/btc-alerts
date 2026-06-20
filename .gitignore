@@ -6,3 +6,6 @@ CLAUDE_CONTEXT.md
 
 # Implementation plans — working notes, not committed
 docs/plans/
+
+# Test coverage profile (make cover)
+coverage.out
