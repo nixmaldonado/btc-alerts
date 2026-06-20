@@ -1,0 +1,22 @@
+# Terraform provider plugins and local cache
+.terraform/
+
+# State files (may contain secrets, e.g. the API key value)
+terraform.tfstate
+terraform.tfstate.*
+*.tfstate
+*.tfstate.backup
+
+# Prebuilt Lambda artifacts (operator builds these before apply)
+build/
+*.zip
+
+# Crash logs and saved plans
+crash.log
+crash.*.log
+*.tfplan
+
+# Variable files that may hold secrets
+*.tfvars
+*.tfvars.json
+!example.tfvars

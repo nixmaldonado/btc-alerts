@@ -80,6 +80,13 @@ tidy: ## Tidy module dependencies
 .PHONY: check
 check: vet imports test ## Vet, format imports, then run unit tests
 
+# ---- Infrastructure ------------------------------------------------------------
+.PHONY: build-lambdas
+build-lambdas: ## Cross-compile the three Lambda bootstrap binaries (linux/arm64) into terraform/build/
+	GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -o terraform/build/api/bootstrap       ./cmd/api
+	GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -o terraform/build/evaluator/bootstrap ./cmd/evaluator
+	GOOS=linux GOARCH=arm64 go build -tags lambda.norpc -o terraform/build/notifier/bootstrap  ./cmd/notifier
+
 .PHONY: help
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \

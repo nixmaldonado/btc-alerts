@@ -9,3 +9,12 @@ docs/plans/
 
 # Test coverage profile (make cover)
 coverage.out
+
+# Stray compiled binaries from `go build ./cmd/<x>` without -o (lambda builds
+# go to terraform/build/, which is ignored separately).
+/api
+/evaluator
+/notifier
+
+# Local, uncommitted admin helpers (e.g. mint-demo-key.local.sh)
+*.local.sh

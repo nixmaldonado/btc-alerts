@@ -41,8 +41,10 @@ func main() {
 	httpClient := &http.Client{Timeout: 10 * time.Second}
 	prices := price.NewClient(httpClient, baseURL)
 
-	// handler is the EventBridge target. Reserved concurrency = 1 (set in Terraform)
-	// keeps ticks serial, so crossing detection stays ordered without a queue.
+	// handler is the EventBridge target. Ticks stay effectively single-flight via
+	// the 30s timeout (under the 60s interval) + no async retries (Terraform) and
+	// the conditional ARMED->FIRED write in FireAlert, so crossing detection stays
+	// ordered without a queue or reserved concurrency.
 	handler := func(ctx context.Context) error {
 		return evaluator.Run(ctx, st, prices, time.Now().UTC())
 	}
