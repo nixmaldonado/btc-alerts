@@ -116,15 +116,19 @@ func (s *Store) DeleteAlert(ctx context.Context, ownerID, id string) error {
 	return nil
 }
 
-// RearmAlert reads the alert, applies the domain Rearm transition, and writes it back.
-// Routing through PutAlert restores the sparse gsi_pk/gsi_sk attributes so the alert
-// re-enters the GSI. Returns the rearmed alert; ErrNotFound when absent.
-func (s *Store) RearmAlert(ctx context.Context, ownerID, id string) (alert.Alert, error) {
+// RearmAlert reads the alert, applies the domain Rearm transition (which re-derives
+// direction from referencePrice, the current price), and writes it back. Routing
+// through PutAlert restores the sparse gsi_pk/gsi_sk attributes so the alert re-enters
+// the GSI under its (possibly new) direction. Returns the rearmed alert; ErrNotFound
+// when absent, or the domain error when the price sits on the target.
+func (s *Store) RearmAlert(ctx context.Context, ownerID, id string, referencePrice float64) (alert.Alert, error) {
 	a, err := s.GetAlert(ctx, ownerID, id)
 	if err != nil {
 		return alert.Alert{}, err
 	}
-	a.Rearm()
+	if err := a.Rearm(referencePrice); err != nil {
+		return alert.Alert{}, err
+	}
 	if err := s.PutAlert(ctx, a); err != nil {
 		return alert.Alert{}, err
 	}

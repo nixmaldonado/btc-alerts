@@ -58,21 +58,25 @@ func NewAlert(ownerID, id string, targetPrice, referencePrice float64, pct *floa
 		return Alert{}, ErrTargetEqualsReference
 	}
 
-	dir := DirectionAbove
-	if targetPrice < referencePrice {
-		dir = DirectionBelow
-	}
-
 	return Alert{
 		OwnerID:        ownerID,
 		ID:             id,
 		Status:         StatusArmed,
-		Direction:      dir,
+		Direction:      directionFor(targetPrice, referencePrice),
 		TargetPrice:    targetPrice,
 		ReferencePrice: referencePrice,
 		Pct:            pct,
 		CreatedAt:      now,
 	}, nil
+}
+
+// directionFor reports which way the price must move to reach the target: ABOVE when
+// the target is above the reference, BELOW otherwise. Callers reject the equal case.
+func directionFor(targetPrice, referencePrice float64) Direction {
+	if targetPrice < referencePrice {
+		return DirectionBelow
+	}
+	return DirectionAbove
 }
 
 // TargetFromPct resolves a percentage target to an absolute price.
@@ -86,8 +90,22 @@ func (a *Alert) Fire(now time.Time) {
 	a.FiredAt = &now
 }
 
-// Rearm returns the alert to the armed state, clearing the fired timestamp.
-func (a *Alert) Rearm() {
+// Rearm returns a fired alert to the armed state, re-deriving its direction from the
+// supplied current price (as NewAlert does) so it watches its target from wherever the
+// price is now — which may flip the original direction. It updates the reference price
+// and clears the fired timestamp. Returns ErrNonPositivePrice for a non-positive price
+// and ErrTargetEqualsReference when the price sits exactly on the target (direction
+// undefined); on either error the alert is left unchanged.
+func (a *Alert) Rearm(referencePrice float64) error {
+	if referencePrice <= 0 {
+		return ErrNonPositivePrice
+	}
+	if a.TargetPrice == referencePrice {
+		return ErrTargetEqualsReference
+	}
+	a.Direction = directionFor(a.TargetPrice, referencePrice)
+	a.ReferencePrice = referencePrice
 	a.Status = StatusArmed
 	a.FiredAt = nil
+	return nil
 }

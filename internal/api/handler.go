@@ -23,7 +23,7 @@ type Store interface {
 	ListAlerts(ctx context.Context, ownerID string) ([]alert.Alert, error)
 	GetAlert(ctx context.Context, ownerID, id string) (alert.Alert, error)
 	DeleteAlert(ctx context.Context, ownerID, id string) error
-	RearmAlert(ctx context.Context, ownerID, id string) (alert.Alert, error)
+	RearmAlert(ctx context.Context, ownerID, id string, referencePrice float64) (alert.Alert, error)
 	GetLastPrice(ctx context.Context) (price float64, ok bool, err error)
 	GetOwnerEmail(ctx context.Context, ownerID string) (email string, ok bool, err error)
 	PutOwnerEmail(ctx context.Context, ownerID, email string) error
@@ -180,13 +180,27 @@ func (h *Handler) rearmAlert(w http.ResponseWriter, r *http.Request) {
 	ownerID := ownerFromContext(r.Context())
 	id := mux.Vars(r)["id"]
 
-	a, err := h.store.RearmAlert(r.Context(), ownerID, id)
+	// Rearm re-derives direction from the current price, so it needs one observed.
+	price, ok, err := h.store.GetLastPrice(r.Context())
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, "failed to read current price")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "price not yet available")
+		return
+	}
+
+	a, err := h.store.RearmAlert(r.Context(), ownerID, id, price)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
 			writeError(w, http.StatusNotFound, "alert not found")
-			return
+		case errors.Is(err, alert.ErrTargetEqualsReference):
+			writeError(w, http.StatusConflict, "current price is at the target; cannot rearm")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to rearm alert")
 		}
-		writeError(w, http.StatusInternalServerError, "failed to rearm alert")
 		return
 	}
 	writeJSON(w, http.StatusOK, newAlertResponse(a))

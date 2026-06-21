@@ -267,9 +267,12 @@ func TestRearmAlert(t *testing.T) {
 				if err := s.PutAlert(context.Background(), a); err != nil {
 					t.Fatalf("PutAlert(fired): %v", err)
 				}
-				// Expected: ARMED again, firedAt cleared — built from an independent copy.
+				// Expected: ARMED again, firedAt cleared, direction re-derived from the
+				// rearm price (70000 keeps it ABOVE) — built from an independent copy.
 				want := a
-				want.Rearm()
+				if err := want.Rearm(70000); err != nil {
+					t.Fatalf("want Rearm: %v", err)
+				}
 				return want
 			},
 			ownerID: "key123",
@@ -291,7 +294,7 @@ func TestRearmAlert(t *testing.T) {
 			if tt.seed != nil {
 				want = tt.seed(t, s)
 			}
-			got, err := s.RearmAlert(ctx, tt.ownerID, tt.id)
+			got, err := s.RearmAlert(ctx, tt.ownerID, tt.id, 70000)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("RearmAlert err = %v, want %v", err, tt.wantErr)
 			}

@@ -124,12 +124,6 @@ func TestAlertTransitions(t *testing.T) {
 			wantStatus: StatusFired,
 			wantFired:  &fireTime,
 		},
-		{
-			name:       "Rearm resets to ARMED and clears the fired timestamp",
-			apply:      func(a *Alert) { a.Fire(fireTime); a.Rearm() },
-			wantStatus: StatusArmed,
-			wantFired:  nil,
-		},
 	}
 
 	for _, tc := range tests {
@@ -149,6 +143,60 @@ func TestAlertTransitions(t *testing.T) {
 				t.Errorf("firedAt = %v, want nil", a.FiredAt)
 			case tc.wantFired != nil && (a.FiredAt == nil || *a.FiredAt != *tc.wantFired):
 				t.Errorf("firedAt = %v, want %v", a.FiredAt, tc.wantFired)
+			}
+		})
+	}
+}
+
+// TestRearm covers re-arming a fired alert: the direction is re-derived from the
+// supplied current price (so the alert watches its target from where the price is
+// now, possibly flipping direction), the reference price and armed state are updated,
+// and a price sitting on the target — or a non-positive price — is rejected.
+func TestRearm(t *testing.T) {
+	tests := []struct {
+		name           string
+		target         float64
+		referencePrice float64 // price at rearm time
+		wantErr        error
+		wantDirection  Direction
+	}{
+		{name: "recomputes ABOVE when price is below target", target: 71000, referencePrice: 70000, wantDirection: DirectionAbove},
+		{name: "recomputes BELOW when price is above target", target: 71000, referencePrice: 72000, wantDirection: DirectionBelow},
+		{name: "rejects price equal to target", target: 71000, referencePrice: 71000, wantErr: ErrTargetEqualsReference},
+		{name: "rejects non-positive price", target: 71000, referencePrice: 0, wantErr: ErrNonPositivePrice},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Start from an armed-then-fired alert; its initial direction is irrelevant
+			// since Rearm re-derives it.
+			a, err := NewAlert("k", "id", tc.target, 70500, nil, testNow)
+			if err != nil {
+				t.Fatalf("NewAlert: %v", err)
+			}
+			a.Fire(testNow.Add(time.Hour))
+
+			err = a.Rearm(tc.referencePrice)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if a.Status != StatusArmed {
+				t.Errorf("status = %q, want ARMED", a.Status)
+			}
+			if a.FiredAt != nil {
+				t.Errorf("firedAt = %v, want nil", a.FiredAt)
+			}
+			if a.Direction != tc.wantDirection {
+				t.Errorf("direction = %q, want %q", a.Direction, tc.wantDirection)
+			}
+			if a.ReferencePrice != tc.referencePrice {
+				t.Errorf("referencePrice = %v, want %v", a.ReferencePrice, tc.referencePrice)
 			}
 		})
 	}

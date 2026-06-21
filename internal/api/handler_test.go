@@ -72,12 +72,14 @@ func (f *fakeStore) DeleteAlert(_ context.Context, ownerID, id string) error {
 	return nil
 }
 
-func (f *fakeStore) RearmAlert(_ context.Context, ownerID, id string) (alert.Alert, error) {
+func (f *fakeStore) RearmAlert(_ context.Context, ownerID, id string, referencePrice float64) (alert.Alert, error) {
 	a, ok := f.alerts[key(ownerID, id)]
 	if !ok {
 		return alert.Alert{}, store.ErrNotFound
 	}
-	a.Rearm()
+	if err := a.Rearm(referencePrice); err != nil {
+		return alert.Alert{}, err
+	}
 	f.alerts[key(ownerID, id)] = a
 	return a, nil
 }
@@ -375,16 +377,20 @@ func TestDeleteAlert(t *testing.T) {
 func TestRearmAlert(t *testing.T) {
 	tests := []struct {
 		name       string
-		id         string // path segment
-		seedFired  bool   // seed a FIRED "a1" the route should re-arm
+		id         string  // path segment
+		seedFired  bool    // seed a FIRED "a1" the route should re-arm
+		priceOK    bool    // whether a current price has been observed
+		price      float64 // the current price the handler reads for re-derivation
 		wantStatus int
 		wantErr    error          // domain error on the store path (nil = success)
 		want       *alertResponse // expected decoded body on success (nil = no body check)
 	}{
 		{
-			name:       "returns armed alert",
+			name:       "returns armed alert with direction re-derived from price",
 			id:         "a1",
 			seedFired:  true,
+			priceOK:    true,
+			price:      70000, // below target 71000 -> stays ABOVE
 			wantStatus: 200,
 			wantErr:    nil,
 			want: &alertResponse{
@@ -399,17 +405,55 @@ func TestRearmAlert(t *testing.T) {
 			},
 		},
 		{
+			name:       "flips direction to BELOW when price is above target",
+			id:         "a1",
+			seedFired:  true,
+			priceOK:    true,
+			price:      72000, // above target 71000 -> flips to BELOW
+			wantStatus: 200,
+			wantErr:    nil,
+			want: &alertResponse{
+				ID:             "a1",
+				Status:         "ARMED",
+				Direction:      "BELOW",
+				TargetPrice:    71000,
+				ReferencePrice: 72000,
+				Pct:            nil,
+				CreatedAt:      testNow,
+				FiredAt:        nil,
+			},
+		},
+		{
 			name:       "not found",
 			id:         "missing",
-			seedFired:  false,
+			priceOK:    true,
+			price:      70000,
 			wantStatus: 404,
 			wantErr:    store.ErrNotFound,
+			want:       nil,
+		},
+		{
+			name:       "price not observed yet",
+			id:         "a1",
+			seedFired:  true,
+			priceOK:    false,
+			wantStatus: 503,
+			want:       nil,
+		},
+		{
+			name:       "price sitting on the target is rejected",
+			id:         "a1",
+			seedFired:  true,
+			priceOK:    true,
+			price:      71000, // equals target -> direction undefined
+			wantStatus: 409,
 			want:       nil,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeStore()
+			f.lastPrice, f.priceOK = tt.price, tt.priceOK
 			if tt.seedFired {
 				a := seedAlert(t, f, "key1", "a1")
 				a.Fire(testNow.Add(time.Hour)) // FIRED in the store
