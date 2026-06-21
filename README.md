@@ -24,9 +24,43 @@ A price-target alert fires once and then disarms, to avoid spamming the subscrib
 
 The evaluator Lambda runs on an EventBridge schedule with reserved concurrency `1`, so price ticks are processed serially. This keeps the "previous price → current price" crossing detection ordered without needing a queue. On each tick it pulls the latest BTC price from CoinGecko and fires any armed alerts whose target the price just crossed. Firing is a single conditional write to DynamoDB (`armed → fired`); a DynamoDB Streams trigger then drives the Notifier Lambda, which delivers the alert email through SES. Decoupling delivery from evaluation via the stream means a notification can never be lost or duplicated by a partial write. Users manage their alerts through API Gateway in front of the Price Alert API Lambda.
 
-## Example
+## Try the Demo
 
-[TBD]
+A live instance is running at **https://btc-alerts.nixmaldonado.com** — a small browser dashboard
+where you can create and manage BTC price alerts without touching `curl`.
+
+In this service **the API key *is* the tenant**: each key only ever sees its own alerts, and rate
+limits apply per key. There's no account/signup — your key is your credential.
+
+1. **Get a key.** Keys are issued out-of-band (no self-signup, to keep the demo free and abuse-resistant).
+   On the login page, use the **"Need a key? Message me →"** Telegram link to request one. You'll
+   receive a magic link of the form `https://btc-alerts.nixmaldonado.com/#k=<your-key>`.
+2. **Log in.** Tap the magic link. The page reads the key from the URL fragment, saves it to your
+   browser's `localStorage`, and scrubs it from the address bar — so the key never hits a server or
+   a link preview. You land on **Your alerts**. Re-clicking the link always works; **Log out** clears
+   the stored key.
+3. **Create an alert.** Enter an email and **exactly one** of:
+   - **Target price (USD)** — fires when BTC crosses that absolute price.
+   - **% move** — the absolute target is computed once at creation from the current price
+     (e.g. `+5%` → `current × 1.05`), then it evaluates on the same path.
+
+   The new alert shows up in the table as **ARMED**.
+4. **Watch it fire.** A scheduled evaluator pulls the latest BTC price and, when your target is
+   crossed, flips the row **ARMED → FIRED** and sends the alert email. An alert fires **once** and
+   then disarms, so you're not spammed if the price wobbles across the threshold repeatedly.
+
+   > **Email caveat:** SES runs in **sandbox mode** for this demo, so the alert email only delivers
+   > to addresses that have been verified with SES. You can still exercise the entire dashboard
+   > (create / list / delete) with any email — only the outbound email is gated.
+5. **Manage.** **Delete** removes an alert. A **FIRED** alert can be re-armed (a **Rearm** button
+   appears on fired rows) to reuse it without re-entering its configuration.
+
+### What you're exercising
+
+Every dashboard action travels the full stack — the browser calls a thin Cloudflare Pages proxy
+(`/api/*`, which avoids CORS and attaches your key as `x-api-key`), which forwards to API Gateway →
+the Price Alert API Lambda → DynamoDB. Firing and delivery run on the separate evaluator/notifier
+path described above.
 
 ## Webhook Payload Schema
 
