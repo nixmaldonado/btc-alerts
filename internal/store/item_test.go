@@ -17,11 +17,11 @@ func ptrF(v float64) *float64 { return &v }
 // armed alerts carry gsi_pk/gsi_sk, fired alerts must not. Asserting specific KEYS keeps us
 // out of diffing raw map[string]types.AttributeValue, whose interface values are awkward to compare.
 func TestToItem_SparseGSIAttributes(t *testing.T) {
-	armed, err := alert.NewAlert("key123", "id1", "user@example.com", 71000, 70000, nil, marshalNow)
+	armed, err := alert.NewAlert("key123", "id1", 71000, 70000, nil, marshalNow)
 	if err != nil {
 		t.Fatalf("NewAlert: %v", err)
 	}
-	fired, _ := alert.NewAlert("key123", "id1", "user@example.com", 71000, 70000, nil, marshalNow)
+	fired, _ := alert.NewAlert("key123", "id1", 71000, 70000, nil, marshalNow)
 	fired.Fire(marshalNow.Add(time.Hour))
 
 	tests := []struct {
@@ -59,12 +59,12 @@ func TestToItem_SparseGSIAttributes(t *testing.T) {
 // cmp.Diff compares whole values; it uses time.Time's Equal method, so createdAt/firedAt
 // round-trip cleanly.
 func TestRoundTrip(t *testing.T) {
-	armed, _ := alert.NewAlert("key123", "id1", "user@example.com", 71000, 70000, nil, marshalNow)
+	armed, _ := alert.NewAlert("key123", "id1", 71000, 70000, nil, marshalNow)
 
-	fired, _ := alert.NewAlert("key123", "id1", "user@example.com", 65000, 70000, nil, marshalNow)
+	fired, _ := alert.NewAlert("key123", "id1", 65000, 70000, nil, marshalNow)
 	fired.Fire(marshalNow.Add(2 * time.Hour))
 
-	pctSet, _ := alert.NewAlert("key123", "id1", "user@example.com", 77000, 70000, ptrF(0.10), marshalNow)
+	pctSet, _ := alert.NewAlert("key123", "id1", 77000, 70000, ptrF(0.10), marshalNow)
 
 	tests := []struct {
 		name string

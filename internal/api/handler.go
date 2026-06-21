@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/mail"
 	"time"
 
 	"github.com/awslabs/aws-lambda-go-api-proxy/core"
@@ -24,6 +25,8 @@ type Store interface {
 	DeleteAlert(ctx context.Context, ownerID, id string) error
 	RearmAlert(ctx context.Context, ownerID, id string) (alert.Alert, error)
 	GetLastPrice(ctx context.Context) (price float64, ok bool, err error)
+	GetOwnerEmail(ctx context.Context, ownerID string) (email string, ok bool, err error)
+	PutOwnerEmail(ctx context.Context, ownerID, email string) error
 }
 
 // Handler holds the dependencies for the Price Alert API. clock and id are
@@ -67,6 +70,8 @@ func (h *Handler) Router() *mux.Router {
 	r.HandleFunc("/alerts", h.listAlerts).Methods(http.MethodGet)
 	r.HandleFunc("/alerts/{id}/rearm", h.rearmAlert).Methods(http.MethodPost)
 	r.HandleFunc("/alerts/{id}", h.deleteAlert).Methods(http.MethodDelete)
+	r.HandleFunc("/email", h.getEmail).Methods(http.MethodGet)
+	r.HandleFunc("/email", h.putEmail).Methods(http.MethodPut)
 
 	r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
@@ -106,13 +111,21 @@ func (h *Handler) createAlert(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.Email == "" {
-		writeError(w, http.StatusBadRequest, "email is required")
-		return
-	}
 	// Exactly one of targetPrice / pct must be supplied.
 	if (body.TargetPrice == nil) == (body.Pct == nil) {
 		writeError(w, http.StatusBadRequest, "provide exactly one of targetPrice or pct")
+		return
+	}
+
+	// The recipient is the tenant's profile email; it must be set before any alert
+	// can be created, since the notifier resolves delivery from it at fire time.
+	email, ok, err := h.store.GetOwnerEmail(r.Context(), ownerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read profile email")
+		return
+	}
+	if !ok || email == "" {
+		writeError(w, http.StatusConflict, "set your notification email first")
 		return
 	}
 
@@ -133,7 +146,7 @@ func (h *Handler) createAlert(w http.ResponseWriter, r *http.Request) {
 		targetPrice = alert.TargetFromPct(price, *body.Pct)
 	}
 
-	a, err := alert.NewAlert(ownerID, h.id(), body.Email, targetPrice, price, body.Pct, h.clock())
+	a, err := alert.NewAlert(ownerID, h.id(), targetPrice, price, body.Pct, h.clock())
 	if err != nil {
 		// All NewAlert errors are caller input problems → 400.
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -192,4 +205,46 @@ func (h *Handler) deleteAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// getEmail returns the tenant's notification email, or {"email": null} when unset.
+func (h *Handler) getEmail(w http.ResponseWriter, r *http.Request) {
+	ownerID := ownerFromContext(r.Context())
+
+	email, ok, err := h.store.GetOwnerEmail(r.Context(), ownerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read profile email")
+		return
+	}
+	out := emailResponse{}
+	if ok {
+		out.Email = &email
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// putEmail sets (or replaces) the tenant's notification email after validating it.
+// Updating it changes delivery for every one of the tenant's alerts, since the
+// notifier resolves the recipient from this profile at fire time.
+func (h *Handler) putEmail(w http.ResponseWriter, r *http.Request) {
+	ownerID := ownerFromContext(r.Context())
+
+	var body emailRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	// ParseAddress also accepts "Name <addr>"; require the bare address to match so
+	// we store exactly what SES will send to.
+	addr, err := mail.ParseAddress(body.Email)
+	if err != nil || addr.Address != body.Email {
+		writeError(w, http.StatusBadRequest, "invalid email address")
+		return
+	}
+
+	if err := h.store.PutOwnerEmail(r.Context(), ownerID, body.Email); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save email")
+		return
+	}
+	writeJSON(w, http.StatusOK, emailResponse{Email: &body.Email})
 }

@@ -22,31 +22,37 @@ const (
 var (
 	ErrNonPositivePrice      = errors.New("alert: prices must be positive")
 	ErrTargetEqualsReference = errors.New("alert: target price equals reference price; direction is undefined")
-	ErrEmptyEmail            = errors.New("alert: email must not be empty")
 )
 
-// Alert is a price-target notification owned by an API key.
+// Alert is a price-target notification owned by an API key. The recipient email is
+// not stored here: it lives once per tenant (the owner's profile item) so editing it
+// updates every alert at once. The notifier resolves the owner's email at fire time.
 type Alert struct {
 	OwnerID        string
 	ID             string
 	Status         Status
 	Direction      Direction
 	TargetPrice    float64
-	Email          string
 	ReferencePrice float64
 	Pct            *float64 // original percentage, if created as a % target
 	CreatedAt      time.Time
 	FiredAt        *time.Time
 }
 
+// Ref identifies a single alert by owner and id — the minimal key needed to fire
+// it. The sparse GSI projects keys only, so a crossing query returns Refs rather
+// than full Alerts: the rest of the item isn't in the index, and firing (a
+// conditional update keyed by owner+id) never needs it.
+type Ref struct {
+	OwnerID string
+	ID      string
+}
+
 // NewAlert builds an armed alert, deriving direction from target vs. reference price.
 // id and now are injected so construction is deterministic and testable.
-func NewAlert(ownerID, id, email string, targetPrice, referencePrice float64, pct *float64, now time.Time) (Alert, error) {
+func NewAlert(ownerID, id string, targetPrice, referencePrice float64, pct *float64, now time.Time) (Alert, error) {
 	if targetPrice <= 0 || referencePrice <= 0 {
 		return Alert{}, ErrNonPositivePrice
-	}
-	if email == "" {
-		return Alert{}, ErrEmptyEmail
 	}
 	if targetPrice == referencePrice {
 		return Alert{}, ErrTargetEqualsReference
@@ -63,7 +69,6 @@ func NewAlert(ownerID, id, email string, targetPrice, referencePrice float64, pc
 		Status:         StatusArmed,
 		Direction:      dir,
 		TargetPrice:    targetPrice,
-		Email:          email,
 		ReferencePrice: referencePrice,
 		Pct:            pct,
 		CreatedAt:      now,

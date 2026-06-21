@@ -22,7 +22,7 @@ type PriceSource interface {
 type Store interface {
 	GetLastPrice(ctx context.Context) (float64, bool, error)
 	PutLastPrice(ctx context.Context, price float64, now time.Time) error
-	QueryArmedCrossed(ctx context.Context, dir alert.Direction, low, high float64) ([]alert.Alert, error)
+	QueryArmedCrossed(ctx context.Context, dir alert.Direction, low, high float64) ([]alert.Ref, error)
 	FireAlert(ctx context.Context, ownerID, id string, now time.Time) error
 }
 

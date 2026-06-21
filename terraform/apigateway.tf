@@ -24,6 +24,13 @@ resource "aws_api_gateway_resource" "rearm" {
   path_part   = "rearm"
 }
 
+# /email — the tenant's single notification address (GET reads it, PUT sets it).
+resource "aws_api_gateway_resource" "email" {
+  rest_api_id = aws_api_gateway_rest_api.alerts.id
+  parent_id   = aws_api_gateway_rest_api.alerts.root_resource_id
+  path_part   = "email"
+}
+
 # ---- Methods (all require an API key) ----
 resource "aws_api_gateway_method" "post_alerts" {
   rest_api_id      = aws_api_gateway_rest_api.alerts.id
@@ -53,6 +60,22 @@ resource "aws_api_gateway_method" "post_rearm" {
   rest_api_id      = aws_api_gateway_rest_api.alerts.id
   resource_id      = aws_api_gateway_resource.rearm.id
   http_method      = "POST"
+  authorization    = "NONE"
+  api_key_required = true
+}
+
+resource "aws_api_gateway_method" "get_email" {
+  rest_api_id      = aws_api_gateway_rest_api.alerts.id
+  resource_id      = aws_api_gateway_resource.email.id
+  http_method      = "GET"
+  authorization    = "NONE"
+  api_key_required = true
+}
+
+resource "aws_api_gateway_method" "put_email" {
+  rest_api_id      = aws_api_gateway_rest_api.alerts.id
+  resource_id      = aws_api_gateway_resource.email.id
+  http_method      = "PUT"
   authorization    = "NONE"
   api_key_required = true
 }
@@ -94,6 +117,24 @@ resource "aws_api_gateway_integration" "post_rearm" {
   uri                     = aws_lambda_function.api.invoke_arn
 }
 
+resource "aws_api_gateway_integration" "get_email" {
+  rest_api_id             = aws_api_gateway_rest_api.alerts.id
+  resource_id             = aws_api_gateway_resource.email.id
+  http_method             = aws_api_gateway_method.get_email.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api.invoke_arn
+}
+
+resource "aws_api_gateway_integration" "put_email" {
+  rest_api_id             = aws_api_gateway_rest_api.alerts.id
+  resource_id             = aws_api_gateway_resource.email.id
+  http_method             = aws_api_gateway_method.put_email.http_method
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api.invoke_arn
+}
+
 resource "aws_lambda_permission" "apigw_invoke" {
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
@@ -111,14 +152,19 @@ resource "aws_api_gateway_deployment" "alerts" {
       aws_api_gateway_resource.alerts.id,
       aws_api_gateway_resource.alert_id.id,
       aws_api_gateway_resource.rearm.id,
+      aws_api_gateway_resource.email.id,
       aws_api_gateway_method.post_alerts.id,
       aws_api_gateway_method.get_alerts.id,
       aws_api_gateway_method.delete_alert.id,
       aws_api_gateway_method.post_rearm.id,
+      aws_api_gateway_method.get_email.id,
+      aws_api_gateway_method.put_email.id,
       aws_api_gateway_integration.post_alerts.id,
       aws_api_gateway_integration.get_alerts.id,
       aws_api_gateway_integration.delete_alert.id,
       aws_api_gateway_integration.post_rearm.id,
+      aws_api_gateway_integration.get_email.id,
+      aws_api_gateway_integration.put_email.id,
     ]))
   }
 

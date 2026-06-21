@@ -10,8 +10,10 @@ resource "aws_lambda_event_source_mapping" "notifier_stream" {
   function_name     = aws_lambda_function.notifier.arn
   starting_position = "LATEST"
 
-  # Only alert items (PK begins with OWNER#) wake the Notifier; STATE#PRICE writes
-  # are filtered out at the event source so once-a-minute price churn is ignored.
+  # Only alert items (PK begins with OWNER#, SK begins with ALERT#) wake the Notifier.
+  # The SK prefix excludes the per-owner PROFILE item (email edits) as well as
+  # STATE#PRICE writes, so neither once-a-minute price churn nor profile updates churn
+  # the Notifier.
   filter_criteria {
     filter {
       pattern = jsonencode({
@@ -19,6 +21,9 @@ resource "aws_lambda_event_source_mapping" "notifier_stream" {
           Keys = {
             PK = {
               S = [{ prefix = "OWNER#" }]
+            }
+            SK = {
+              S = [{ prefix = "ALERT#" }]
             }
           }
         }

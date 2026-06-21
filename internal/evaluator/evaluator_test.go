@@ -33,7 +33,7 @@ type fakeStore struct {
 	getErr    error
 	putErr    error
 	queryErr  error
-	hits      []alert.Alert    // returned from QueryArmedCrossed
+	hits      []alert.Ref      // returned from QueryArmedCrossed
 	fireErrs  map[string]error // keyed by id -> error returned from FireAlert
 	puts      []float64        // prices passed to PutLastPrice
 	queries   []queryCall
@@ -52,7 +52,7 @@ func (f *fakeStore) PutLastPrice(ctx context.Context, price float64, now time.Ti
 	return nil
 }
 
-func (f *fakeStore) QueryArmedCrossed(ctx context.Context, dir alert.Direction, low, high float64) ([]alert.Alert, error) {
+func (f *fakeStore) QueryArmedCrossed(ctx context.Context, dir alert.Direction, low, high float64) ([]alert.Ref, error) {
 	f.queries = append(f.queries, queryCall{dir: dir, low: low, high: high})
 	if f.queryErr != nil {
 		return nil, f.queryErr
@@ -94,7 +94,7 @@ func TestRun_Orchestration(t *testing.T) {
 		getErr    error
 		putErr    error
 		queryErr  error
-		hits      []alert.Alert
+		hits      []alert.Ref
 		fireErrs  map[string]error
 
 		// price source.
@@ -118,7 +118,7 @@ func TestRun_Orchestration(t *testing.T) {
 		{
 			name:      "rise queries ABOVE (prev,cur) and fires hits in order",
 			lastPrice: 70000, lastOK: true,
-			hits: []alert.Alert{
+			hits: []alert.Ref{
 				{OwnerID: "k1", ID: "a1"},
 				{OwnerID: "k2", ID: "a2"},
 			},
@@ -146,7 +146,7 @@ func TestRun_Orchestration(t *testing.T) {
 		{
 			name:      "ErrNotArmed is skipped, siblings still fire",
 			lastPrice: 70000, lastOK: true,
-			hits: []alert.Alert{
+			hits: []alert.Ref{
 				{OwnerID: "k1", ID: "a1"},
 				{OwnerID: "k2", ID: "a2"}, // already fired concurrently
 				{OwnerID: "k3", ID: "a3"},
@@ -160,10 +160,10 @@ func TestRun_Orchestration(t *testing.T) {
 		{
 			name:      "other fire error aborts the tick",
 			lastPrice: 70000, lastOK: true,
-			hits:      []alert.Alert{{OwnerID: "k1", ID: "a1"}},
-			fireErrs:  map[string]error{"a1": boom},
-			curPrice:  71000,
-			wantErr:   boom,
+			hits:     []alert.Ref{{OwnerID: "k1", ID: "a1"}},
+			fireErrs: map[string]error{"a1": boom},
+			curPrice: 71000,
+			wantErr:  boom,
 		},
 		{
 			name:     "GetLastPrice error propagates",

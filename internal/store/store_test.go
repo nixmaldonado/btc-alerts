@@ -77,7 +77,11 @@ func newTestStore(t *testing.T) *Store {
 					{AttributeName: aws.String(attrGSIPK), KeyType: types.KeyTypeHash},
 					{AttributeName: aws.String(attrGSISK), KeyType: types.KeyTypeRange},
 				},
-				Projection: &types.Projection{ProjectionType: types.ProjectionTypeAll},
+				// KEYS_ONLY mirrors the production GSI (terraform/dynamodb.tf): the index
+				// carries only the primary key, which is all the evaluator needs to fire a
+				// crossed alert. Modeling it faithfully here is what catches a projection/read
+				// mismatch — projecting ALL is what hid the bug that shipped.
+				Projection: &types.Projection{ProjectionType: types.ProjectionTypeKeysOnly},
 			},
 		},
 	})
@@ -100,7 +104,7 @@ func newTestStore(t *testing.T) *Store {
 // mustPut builds an armed alert and stores it, failing the test on error.
 func mustPut(t *testing.T, s *Store, owner, id string, target, reference float64) alert.Alert {
 	t.Helper()
-	a, err := alert.NewAlert(owner, id, "user@example.com", target, reference, nil, fixedNow)
+	a, err := alert.NewAlert(owner, id, target, reference, nil, fixedNow)
 	if err != nil {
 		t.Fatalf("NewAlert: %v", err)
 	}
@@ -258,7 +262,7 @@ func TestRearmAlert(t *testing.T) {
 			name: "rearms fired alert and restores sparse index",
 			seed: func(t *testing.T, s *Store) alert.Alert {
 				// Store a fired alert directly so it has no gsi_pk/gsi_sk.
-				a, _ := alert.NewAlert("key123", "id1", "user@example.com", 71000, 70000, nil, fixedNow)
+				a, _ := alert.NewAlert("key123", "id1", 71000, 70000, nil, fixedNow)
 				a.Fire(fixedNow.Add(time.Hour))
 				if err := s.PutAlert(context.Background(), a); err != nil {
 					t.Fatalf("PutAlert(fired): %v", err)
@@ -302,7 +306,8 @@ func TestRearmAlert(t *testing.T) {
 			if err != nil {
 				t.Fatalf("QueryArmedCrossed: %v", err)
 			}
-			if diff := cmp.Diff([]alert.Alert{want}, hits); diff != "" {
+			wantRefs := []alert.Ref{{OwnerID: want.OwnerID, ID: want.ID}}
+			if diff := cmp.Diff(wantRefs, hits); diff != "" {
 				t.Errorf("after rearm QueryArmedCrossed mismatch (-want +got):\n%s", diff)
 			}
 		})
@@ -349,6 +354,43 @@ func TestLastPrice(t *testing.T) {
 	}
 }
 
+// TestOwnerEmail covers the per-tenant profile email singleton: absent reports
+// ok=false; a written email reads back; a second write overwrites the first.
+func TestOwnerEmail(t *testing.T) {
+	tests := []struct {
+		name   string
+		write  []string // emails to PutOwnerEmail in order; nil = none
+		wantOK bool
+		want   string
+	}{
+		{name: "absent returns ok=false", write: nil, wantOK: false},
+		{name: "returns the written email", write: []string{"a@example.com"}, wantOK: true, want: "a@example.com"},
+		{name: "overwrite keeps the latest", write: []string{"a@example.com", "b@example.com"}, wantOK: true, want: "b@example.com"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newTestStore(t)
+			ctx := context.Background()
+			for _, e := range tt.write {
+				if err := s.PutOwnerEmail(ctx, "key123", e); err != nil {
+					t.Fatalf("PutOwnerEmail: %v", err)
+				}
+			}
+			got, ok, err := s.GetOwnerEmail(ctx, "key123")
+			if err != nil {
+				t.Fatalf("GetOwnerEmail: %v", err)
+			}
+			if ok != tt.wantOK {
+				t.Fatalf("ok = %v, want %v", ok, tt.wantOK)
+			}
+			if tt.wantOK && got != tt.want {
+				t.Errorf("email = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestQueryArmedCrossed is table-driven over the GSI range filter. seed populates the
 // table (the same fixtures for every case) and the table enumerates direction/low/high
 // inputs with the alert IDs each query must return, in ascending-target (gsi_sk) order.
@@ -383,9 +425,10 @@ func TestQueryArmedCrossed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newTestStore(t)
 			fixtures := seed(t, s)
-			var want []alert.Alert
+			var want []alert.Ref
 			for _, id := range tt.wantIDs {
-				want = append(want, fixtures[id])
+				a := fixtures[id]
+				want = append(want, alert.Ref{OwnerID: a.OwnerID, ID: a.ID})
 			}
 			hits, err := s.QueryArmedCrossed(context.Background(), tt.dir, tt.low, tt.high)
 			if err != nil {

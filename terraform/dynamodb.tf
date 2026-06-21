@@ -38,16 +38,16 @@ resource "aws_dynamodb_table" "alerts" {
   stream_view_type = "NEW_AND_OLD_IMAGES"
 
   global_secondary_index {
-    name            = "status-target-index"
-    hash_key        = "gsi_pk"
-    range_key       = "gsi_sk"
-    read_capacity   = 12
-    write_capacity  = 12
-    projection_type = "INCLUDE"
-    non_key_attributes = [
-      "email",
-      "direction",
-    ]
+    name           = "status-target-index"
+    hash_key       = "gsi_pk"
+    range_key      = "gsi_sk"
+    read_capacity  = 12
+    write_capacity = 12
+    # KEYS_ONLY: the evaluator queries this index only to learn which armed alerts a
+    # price move crossed, then fires each by primary key (owner+id) — which the index
+    # always carries. Projecting more attributes would couple the index to the Alert
+    # schema; an earlier INCLUDE list that omitted "status" silently broke every fire.
+    projection_type = "KEYS_ONLY"
   }
 
   point_in_time_recovery {

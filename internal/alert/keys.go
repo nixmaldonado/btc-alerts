@@ -14,6 +14,10 @@ func AlertSK(id string) string { return "ALERT#" + id }
 func StatePK() string { return statePriceKey }
 func StateSK() string { return statePriceKey }
 
+// ProfileSK is the sort key for a tenant's profile item, which lives in the owner
+// partition (PK = OWNER#<id>) alongside that tenant's alerts and holds the email.
+func ProfileSK() string { return "PROFILE" }
+
 // GSIPK is the sparse GSI partition key for armed alerts, split by direction.
 func GSIPK(d Direction) string { return "ARMED#" + string(d) }
 

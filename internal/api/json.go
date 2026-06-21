@@ -9,11 +9,11 @@ import (
 )
 
 // createAlertRequest is the POST /alerts body. Exactly one of TargetPrice / Pct
-// must be set; Email is always required. Pointers distinguish "absent" from zero.
+// must be set. The recipient email is not part of this body: it comes from the
+// tenant's profile (see PUT /email). Pointers distinguish "absent" from zero.
 type createAlertRequest struct {
 	TargetPrice *float64 `json:"targetPrice,omitempty"`
 	Pct         *float64 `json:"pct,omitempty"`
-	Email       string   `json:"email"`
 }
 
 // alertResponse is the JSON shape returned for a single alert.
@@ -22,7 +22,6 @@ type alertResponse struct {
 	Status         string     `json:"status"`
 	Direction      string     `json:"direction"`
 	TargetPrice    float64    `json:"targetPrice"`
-	Email          string     `json:"email"`
 	ReferencePrice float64    `json:"referencePrice"`
 	Pct            *float64   `json:"pct,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
@@ -35,12 +34,22 @@ func newAlertResponse(a alert.Alert) alertResponse {
 		Status:         string(a.Status),
 		Direction:      string(a.Direction),
 		TargetPrice:    a.TargetPrice,
-		Email:          a.Email,
 		ReferencePrice: a.ReferencePrice,
 		Pct:            a.Pct,
 		CreatedAt:      a.CreatedAt,
 		FiredAt:        a.FiredAt,
 	}
+}
+
+// emailRequest is the PUT /email body — the tenant's single notification address.
+type emailRequest struct {
+	Email string `json:"email"`
+}
+
+// emailResponse is the GET/PUT /email shape. Email is nil when the tenant has not
+// set one yet, so GET on a fresh tenant returns {"email": null}.
+type emailResponse struct {
+	Email *string `json:"email"`
 }
 
 // errorBody is the JSON error envelope.

@@ -76,7 +76,6 @@ func toItem(a alert.Alert) map[string]types.AttributeValue {
 		attrStatus:         s(string(a.Status)),
 		attrDirection:      s(string(a.Direction)),
 		attrTargetPrice:    n(a.TargetPrice),
-		attrEmail:          s(a.Email),
 		attrReferencePrice: n(a.ReferencePrice),
 		attrCreatedAt:      s(a.CreatedAt.Format(time.RFC3339)),
 	}
@@ -91,6 +90,25 @@ func toItem(a alert.Alert) map[string]types.AttributeValue {
 		it[attrGSISK] = s(alert.GSISK(a.TargetPrice))
 	}
 	return it
+}
+
+// refFromItem extracts an alert's owner+id from a GSI query item. The sparse index
+// projects keys only, so PK/SK are the only attributes present — and all the
+// evaluator needs to fire the alert. It inverts the OWNER#/ALERT# prefixes the
+// same way fromItem does.
+func refFromItem(it map[string]types.AttributeValue) (alert.Ref, error) {
+	pk, err := getS(it, attrPK)
+	if err != nil {
+		return alert.Ref{}, err
+	}
+	sk, err := getS(it, attrSK)
+	if err != nil {
+		return alert.Ref{}, err
+	}
+	return alert.Ref{
+		OwnerID: pk[len("OWNER#"):],
+		ID:      sk[len("ALERT#"):],
+	}, nil
 }
 
 // fromItem reconstructs an Alert from a DynamoDB item map.
@@ -115,10 +133,6 @@ func fromItem(it map[string]types.AttributeValue) (alert.Alert, error) {
 	if err != nil {
 		return alert.Alert{}, err
 	}
-	email, err := getS(it, attrEmail)
-	if err != nil {
-		return alert.Alert{}, err
-	}
 	reference, err := getN(it, attrReferencePrice)
 	if err != nil {
 		return alert.Alert{}, err
@@ -138,7 +152,6 @@ func fromItem(it map[string]types.AttributeValue) (alert.Alert, error) {
 		Status:         alert.Status(status),
 		Direction:      alert.Direction(direction),
 		TargetPrice:    target,
-		Email:          email,
 		ReferencePrice: reference,
 		CreatedAt:      createdAt,
 	}

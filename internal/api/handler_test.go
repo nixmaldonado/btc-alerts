@@ -26,13 +26,14 @@ const testID = "fixed-id-1"
 // It needs no AWS/DynamoDB, so every handler test is hermetic.
 type fakeStore struct {
 	alerts    map[string]alert.Alert // key: ownerID + "|" + id
+	emails    map[string]string      // key: ownerID -> profile email
 	lastPrice float64
 	priceOK   bool
 	putErr    error
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{alerts: map[string]alert.Alert{}}
+	return &fakeStore{alerts: map[string]alert.Alert{}, emails: map[string]string{}}
 }
 
 func key(ownerID, id string) string { return ownerID + "|" + id }
@@ -83,6 +84,16 @@ func (f *fakeStore) RearmAlert(_ context.Context, ownerID, id string) (alert.Ale
 
 func (f *fakeStore) GetLastPrice(_ context.Context) (float64, bool, error) {
 	return f.lastPrice, f.priceOK, nil
+}
+
+func (f *fakeStore) GetOwnerEmail(_ context.Context, ownerID string) (string, bool, error) {
+	email, ok := f.emails[ownerID]
+	return email, ok, nil
+}
+
+func (f *fakeStore) PutOwnerEmail(_ context.Context, ownerID, email string) error {
+	f.emails[ownerID] = email
+	return nil
 }
 
 // newTestRouter wires the fake with a fixed clock and id and returns the mux
@@ -152,13 +163,12 @@ func TestCreateAlert_Success(t *testing.T) {
 		{
 			name:  "absolute target",
 			owner: "key1",
-			body:  `{"targetPrice":71000,"email":"u@example.com"}`,
+			body:  `{"targetPrice":71000}`,
 			want: alertResponse{
 				ID:             testID,
 				Status:         "ARMED",
 				Direction:      "ABOVE",
 				TargetPrice:    71000,
-				Email:          "u@example.com",
 				ReferencePrice: 70000,
 				Pct:            nil,
 				CreatedAt:      testNow,
@@ -167,13 +177,12 @@ func TestCreateAlert_Success(t *testing.T) {
 		{
 			name:  "pct resolves against last price",
 			owner: "key1",
-			body:  `{"pct":0.10,"email":"u@example.com"}`,
+			body:  `{"pct":0.10}`,
 			want: alertResponse{
 				ID:             testID,
 				Status:         "ARMED",
 				Direction:      "ABOVE",
 				TargetPrice:    77000, // 70000 * (1 + 0.10)
-				Email:          "u@example.com",
 				ReferencePrice: 70000,
 				Pct:            pctPtr(0.10),
 				CreatedAt:      testNow,
@@ -184,6 +193,7 @@ func TestCreateAlert_Success(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeStore()
 			f.lastPrice, f.priceOK = 70000, true
+			f.emails[tt.owner] = "u@example.com" // profile email is required to create
 
 			rr := do(newTestRouter(f), "POST", "/alerts", tt.owner, tt.body)
 			if rr.Code != 201 {
@@ -211,22 +221,26 @@ func TestCreateAlert_Success(t *testing.T) {
 // is correct; cmp.Diff is reserved for whole-value alert comparisons above.
 func TestCreateAlert_ValidationErrors(t *testing.T) {
 	tests := []struct {
-		name       string
-		priceOK    bool
-		body       string
-		wantStatus int
+		name         string
+		priceOK      bool
+		profileEmail string // "" = no profile set for the tenant
+		body         string
+		wantStatus   int
 	}{
-		{name: "both target and pct", priceOK: true, body: `{"targetPrice":71000,"pct":0.1,"email":"u@example.com"}`, wantStatus: 400},
-		{name: "neither target nor pct", priceOK: true, body: `{"email":"u@example.com"}`, wantStatus: 400},
-		{name: "missing email", priceOK: true, body: `{"targetPrice":71000}`, wantStatus: 400},
-		{name: "malformed json", priceOK: true, body: `{not json`, wantStatus: 400},
-		{name: "target equals reference", priceOK: true, body: `{"targetPrice":70000,"email":"u@example.com"}`, wantStatus: 400},
-		{name: "no price observed yet", priceOK: false, body: `{"targetPrice":71000,"email":"u@example.com"}`, wantStatus: 503},
+		{name: "both target and pct", priceOK: true, profileEmail: "u@example.com", body: `{"targetPrice":71000,"pct":0.1}`, wantStatus: 400},
+		{name: "neither target nor pct", priceOK: true, profileEmail: "u@example.com", body: `{}`, wantStatus: 400},
+		{name: "no profile email set", priceOK: true, profileEmail: "", body: `{"targetPrice":71000}`, wantStatus: 409},
+		{name: "malformed json", priceOK: true, profileEmail: "u@example.com", body: `{not json`, wantStatus: 400},
+		{name: "target equals reference", priceOK: true, profileEmail: "u@example.com", body: `{"targetPrice":70000}`, wantStatus: 400},
+		{name: "no price observed yet", priceOK: false, profileEmail: "u@example.com", body: `{"targetPrice":71000}`, wantStatus: 503},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeStore()
 			f.lastPrice, f.priceOK = 70000, tt.priceOK
+			if tt.profileEmail != "" {
+				f.emails["key1"] = tt.profileEmail
+			}
 
 			rr := do(newTestRouter(f), "POST", "/alerts", "key1", tt.body)
 			if rr.Code != tt.wantStatus {
@@ -241,7 +255,7 @@ func TestCreateAlert_ValidationErrors(t *testing.T) {
 
 func seedAlert(t *testing.T, f *fakeStore, ownerID, id string) alert.Alert {
 	t.Helper()
-	a, err := alert.NewAlert(ownerID, id, "u@example.com", 71000, 70000, nil, testNow)
+	a, err := alert.NewAlert(ownerID, id, 71000, 70000, nil, testNow)
 	if err != nil {
 		t.Fatalf("seed NewAlert: %v", err)
 	}
@@ -252,7 +266,7 @@ func seedAlert(t *testing.T, f *fakeStore, ownerID, id string) alert.Alert {
 // seedAlertFor builds (but does not store) an expected alert for list assertions.
 func seedAlertFor(t *testing.T, ownerID, id string) alert.Alert {
 	t.Helper()
-	a, err := alert.NewAlert(ownerID, id, "u@example.com", 71000, 70000, nil, testNow)
+	a, err := alert.NewAlert(ownerID, id, 71000, 70000, nil, testNow)
 	if err != nil {
 		t.Fatalf("expected NewAlert: %v", err)
 	}
@@ -378,7 +392,6 @@ func TestRearmAlert(t *testing.T) {
 				Status:         "ARMED",
 				Direction:      "ABOVE",
 				TargetPrice:    71000,
-				Email:          "u@example.com",
 				ReferencePrice: 70000,
 				Pct:            nil,
 				CreatedAt:      testNow,
@@ -417,6 +430,69 @@ func TestRearmAlert(t *testing.T) {
 				if diff := cmp.Diff(*tt.want, got); diff != "" {
 					t.Errorf("rearmed alert mismatch (-want +got):\n%s", diff)
 				}
+			}
+		})
+	}
+}
+
+// TestGetEmail covers the profile-email read: unset returns {"email":null};
+// a previously-set email reads back.
+func TestGetEmail(t *testing.T) {
+	tests := []struct {
+		name      string
+		seedEmail string // "" = no profile set
+		wantBody  string
+	}{
+		{name: "unset returns null", seedEmail: "", wantBody: `{"email":null}`},
+		{name: "set returns the email", seedEmail: "u@example.com", wantBody: `{"email":"u@example.com"}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeStore()
+			if tt.seedEmail != "" {
+				f.emails["key1"] = tt.seedEmail
+			}
+			rr := do(newTestRouter(f), "GET", "/email", "key1", "")
+			if rr.Code != 200 {
+				t.Fatalf("status = %d, want 200 (body=%s)", rr.Code, rr.Body.String())
+			}
+			if got := strings.TrimSpace(rr.Body.String()); got != tt.wantBody {
+				t.Errorf("body = %s, want %s", got, tt.wantBody)
+			}
+		})
+	}
+}
+
+// TestPutEmail covers validation and persistence: a valid address is stored and
+// echoed; a malformed one is rejected 400 and nothing is written.
+func TestPutEmail(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantStatus int
+		wantStored string // "" = expect nothing stored
+	}{
+		{name: "valid address stored", body: `{"email":"new@example.com"}`, wantStatus: 200, wantStored: "new@example.com"},
+		{name: "missing address rejected", body: `{"email":""}`, wantStatus: 400},
+		{name: "malformed address rejected", body: `{"email":"not-an-email"}`, wantStatus: 400},
+		{name: "name-form address rejected", body: `{"email":"Me <me@example.com>"}`, wantStatus: 400},
+		{name: "malformed json rejected", body: `{nope`, wantStatus: 400},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeStore()
+			rr := do(newTestRouter(f), "PUT", "/email", "key1", tt.body)
+			if rr.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body=%s)", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+			if tt.wantStored == "" {
+				if _, ok := f.emails["key1"]; ok {
+					t.Errorf("email stored on failure: %q", f.emails["key1"])
+				}
+				return
+			}
+			if f.emails["key1"] != tt.wantStored {
+				t.Errorf("stored = %q, want %q", f.emails["key1"], tt.wantStored)
 			}
 		})
 	}

@@ -100,6 +100,15 @@ data "aws_iam_policy_document" "notifier" {
   }
 
   statement {
+    # The notifier resolves the recipient from the owner's profile item at fire time,
+    # so it needs to read the base table (single GetItem per fired alert).
+    sid       = "ReadProfile"
+    effect    = "Allow"
+    actions   = ["dynamodb:GetItem"]
+    resources = [aws_dynamodb_table.alerts.arn]
+  }
+
+  statement {
     sid    = "SendEmail"
     effect = "Allow"
     actions = [

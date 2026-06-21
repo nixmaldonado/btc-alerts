@@ -180,10 +180,48 @@ func s_(t time.Time) types.AttributeValue {
 	return &types.AttributeValueMemberS{Value: t.Format(time.RFC3339)}
 }
 
+// GetOwnerEmail reads the tenant's profile email (PK=OWNER#owner, SK=PROFILE).
+// ok is false when the tenant has not set one yet.
+func (s *Store) GetOwnerEmail(ctx context.Context, ownerID string) (email string, ok bool, err error) {
+	out, err := s.client.GetItem(ctx, &dynamodb.GetItemInput{
+		TableName: aws.String(s.table),
+		Key: map[string]types.AttributeValue{
+			attrPK: s.pk(ownerID),
+			attrSK: &types.AttributeValueMemberS{Value: alert.ProfileSK()},
+		},
+	})
+	if err != nil {
+		return "", false, err
+	}
+	if out.Item == nil {
+		return "", false, nil
+	}
+	email, err = getS(out.Item, attrEmail)
+	if err != nil {
+		return "", false, err
+	}
+	return email, true, nil
+}
+
+// PutOwnerEmail writes (creates or replaces) the tenant's profile email. Because the
+// notifier resolves the recipient from this item at fire time, updating it changes
+// delivery for all of a tenant's alerts, including ones already created.
+func (s *Store) PutOwnerEmail(ctx context.Context, ownerID, email string) error {
+	_, err := s.client.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: aws.String(s.table),
+		Item: map[string]types.AttributeValue{
+			attrPK:    s.pk(ownerID),
+			attrSK:    &types.AttributeValueMemberS{Value: alert.ProfileSK()},
+			attrEmail: &types.AttributeValueMemberS{Value: email},
+		},
+	})
+	return err
+}
+
 // QueryArmedCrossed returns armed alerts of the given direction whose target lies in
 // [low, high] inclusive, by ranging the sparse GSI. Only armed alerts carry gsi_pk/gsi_sk,
 // so fired/disarmed alerts never appear.
-func (s *Store) QueryArmedCrossed(ctx context.Context, dir alert.Direction, low, high float64) ([]alert.Alert, error) {
+func (s *Store) QueryArmedCrossed(ctx context.Context, dir alert.Direction, low, high float64) ([]alert.Ref, error) {
 	input := &dynamodb.QueryInput{
 		TableName:              aws.String(s.table),
 		IndexName:              aws.String(GSIName),
@@ -199,7 +237,9 @@ func (s *Store) QueryArmedCrossed(ctx context.Context, dir alert.Direction, low,
 		},
 	}
 
-	var alerts []alert.Alert
+	// nil (not []alert.Ref{}) so an empty result deep-equals the no-hit case in
+	// callers and tests; this value is never JSON-encoded.
+	var refs []alert.Ref
 	paginator := dynamodb.NewQueryPaginator(s.client, input)
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
@@ -207,14 +247,14 @@ func (s *Store) QueryArmedCrossed(ctx context.Context, dir alert.Direction, low,
 			return nil, err
 		}
 		for _, it := range page.Items {
-			a, err := fromItem(it)
+			ref, err := refFromItem(it)
 			if err != nil {
 				return nil, err
 			}
-			alerts = append(alerts, a)
+			refs = append(refs, ref)
 		}
 	}
-	return alerts, nil
+	return refs, nil
 }
 
 // FireAlert conditionally transitions an alert ARMED→FIRED. The status=ARMED condition

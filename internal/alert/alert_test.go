@@ -13,7 +13,6 @@ func TestNewAlert(t *testing.T) {
 		name          string
 		ownerID       string
 		id            string
-		email         string
 		target        float64
 		reference     float64
 		pct           *float64
@@ -24,7 +23,6 @@ func TestNewAlert(t *testing.T) {
 			name:          "direction is ABOVE when target exceeds reference",
 			ownerID:       "key123",
 			id:            "id1",
-			email:         "user@example.com",
 			target:        71000,
 			reference:     70000,
 			wantDirection: DirectionAbove,
@@ -33,7 +31,6 @@ func TestNewAlert(t *testing.T) {
 			name:          "direction is BELOW when target is under reference",
 			ownerID:       "key123",
 			id:            "id2",
-			email:         "user@example.com",
 			target:        65000,
 			reference:     70000,
 			wantDirection: DirectionBelow,
@@ -42,7 +39,6 @@ func TestNewAlert(t *testing.T) {
 			name:      "rejects target equal to reference (direction undefined)",
 			ownerID:   "key123",
 			id:        "id3",
-			email:     "user@example.com",
 			target:    70000,
 			reference: 70000,
 			wantErr:   ErrTargetEqualsReference,
@@ -50,7 +46,6 @@ func TestNewAlert(t *testing.T) {
 		{
 			name:      "rejects zero target price",
 			id:        "id",
-			email:     "user@example.com",
 			target:    0,
 			reference: 70000,
 			wantErr:   ErrNonPositivePrice,
@@ -58,24 +53,15 @@ func TestNewAlert(t *testing.T) {
 		{
 			name:      "rejects negative reference price",
 			id:        "id",
-			email:     "user@example.com",
 			target:    71000,
 			reference: -1,
 			wantErr:   ErrNonPositivePrice,
-		},
-		{
-			name:      "rejects empty email",
-			id:        "id",
-			email:     "",
-			target:    71000,
-			reference: 70000,
-			wantErr:   ErrEmptyEmail,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			a, err := NewAlert(tc.ownerID, tc.id, tc.email, tc.target, tc.reference, tc.pct, testNow)
+			a, err := NewAlert(tc.ownerID, tc.id, tc.target, tc.reference, tc.pct, testNow)
 
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
@@ -148,7 +134,7 @@ func TestAlertTransitions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			a, err := NewAlert("k", "id", "user@example.com", 71000, 70000, nil, testNow)
+			a, err := NewAlert("k", "id", 71000, 70000, nil, testNow)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
