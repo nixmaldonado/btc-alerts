@@ -12,10 +12,6 @@ Two alert modes:
 
 A price-target alert fires once and then disarms, to avoid spamming the subscriber if the threshold is crossed multiple times. It can be re-armed manually without re-entering the alert's configuration.
 
-## Pre-Requisites
-
-[TBD]
-
 ## Data Flow Diagram
 
 <p align="center">
@@ -26,8 +22,8 @@ The evaluator Lambda runs on an EventBridge schedule with reserved concurrency `
 
 ## Try the Demo
 
-A live instance is running at **https://btc-alerts.nixmaldonado.com** — a small browser dashboard
-where you can create and manage BTC price alerts without touching `curl`.
+A live instance is running at **https://btc-alerts.nixmaldonado.com** 
+A small browser dashboard where you can create and manage BTC price alerts without touching `curl`.
 
 In this service **the API key *is* the tenant**: each key only ever sees its own alerts, and rate
 limits apply per key. There's no account/signup — your key is your credential.
@@ -39,21 +35,26 @@ limits apply per key. There's no account/signup — your key is your credential.
    browser's `localStorage`, and scrubs it from the address bar — so the key never hits a server or
    a link preview. You land on **Your alerts**. Re-clicking the link always works; **Log out** clears
    the stored key.
-3. **Create an alert.** Enter an email and **exactly one** of:
+3. **Set your notification email.** Set the address alerts go to — it's stored **once** on your
+   profile, not per alert. Every alert you create notifies that address, and editing it later updates
+   delivery for **all** your alerts, including ones already created (the notifier resolves the
+   recipient from your profile when an alert fires).
+4. **Create an alert.** Pick **exactly one** of:
    - **Target price (USD)** — fires when BTC crosses that absolute price.
    - **% move** — the absolute target is computed once at creation from the current price
      (e.g. `+5%` → `current × 1.05`), then it evaluates on the same path.
 
-   The new alert shows up in the table as **ARMED**.
-4. **Watch it fire.** A scheduled evaluator pulls the latest BTC price and, when your target is
-   crossed, flips the row **ARMED → FIRED** and sends the alert email. An alert fires **once** and
-   then disarms, so you're not spammed if the price wobbles across the threshold repeatedly.
+   The new alert shows up in the table as **ARMED**. (Your notification email must be set first.)
+5. **Watch it fire.** A scheduled evaluator pulls the latest BTC price and, when your target is
+   crossed, flips the row **ARMED → FIRED** and emails your profile address. An alert fires **once**
+   and then disarms, so you're not spammed if the price wobbles across the threshold repeatedly.
 
-   > **Email caveat:** SES runs in **sandbox mode** for this demo, so the alert email only delivers
-   > to addresses that have been verified with SES. You can still exercise the entire dashboard
-   > (create / list / delete) with any email — only the outbound email is gated.
-5. **Manage.** **Delete** removes an alert. A **FIRED** alert can be re-armed (a **Rearm** button
-   appears on fired rows) to reuse it without re-entering its configuration.
+   > **Email caveat:** SES runs in **sandbox mode** for this demo, so alerts only deliver to an
+   > address that has been verified with SES. The dashboard (create / list / rearm / delete) works
+   > regardless — only outbound email is gated.
+6. **Manage.** **Delete** removes an alert. A **FIRED** alert can be **Rearm**ed to watch its target
+   again — rearm re-derives the direction from the *current* price, so the alert fires on the next
+   crossing from wherever the price is now (which can flip an ABOVE target to BELOW, or vice-versa).
 
 ### What you're exercising
 
@@ -61,10 +62,6 @@ Every dashboard action travels the full stack — the browser calls a thin Cloud
 (`/api/*`, which avoids CORS and attaches your key as `x-api-key`), which forwards to API Gateway →
 the Price Alert API Lambda → DynamoDB. Firing and delivery run on the separate evaluator/notifier
 path described above.
-
-## Webhook Payload Schema
-
-[TBD]
 
 ## Deployment
 
@@ -88,13 +85,11 @@ Lambda, DynamoDB (including DynamoDB Streams), SQS (the Notifier's dead-letter q
 
 ### DoW attacks 
 
-The service is protected against Denial-of-Wallet attacks through three layers: 
+The public API is protected against Denial-of-Wallet attacks at the API Gateway edge, before any
+request reaches a Lambda:
 - API Gateway usage plans with per-key quotas
-- API Gateway request throttling
-- Lambda reserved concurrency. 
- 
-This caps the realistic cost impact of API abuse at a few dollars even under sustained attack.
+- API Gateway request throttling (per-key rate + burst limits)
 
-## Current Status
-
-Initial phase of development, most of the project hasn't been implemented yet.
+Throttling bounds how fast requests reach the API Lambda, so invocation volume — and therefore cost —
+stays capped without a reserved-concurrency limit on the function. This holds the realistic cost
+impact of API abuse to a few dollars even under sustained attack.
